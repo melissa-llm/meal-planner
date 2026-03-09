@@ -177,17 +177,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <script>
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxhLj2YzaULz_84jQRzCcxkluCitR-RlxVS-BfwJ4txPFtmMozNC9_Yr4ikoZQWwi9g4g/exec";
-const APP_TOKEN = "melissa2026"; // must match CONFIG.APP_TOKEN in Apps Script
+const APP_TOKEN = "tryingsomesh1t2026"; // must match CONFIG.APP_TOKEN in Apps Script
 
 let MEALS = [], SECTIONS = [], RECIPES = [], WEEK = "", favorites = [], neverDo = [], allFavs = [];
 let activeMeals = new Set(), checkedItems = new Set(), extraMeals = [];
 let STORAGE_KEY = "grocery_";
 
-// ── LOAD DATA FROM APPS SCRIPT ─────────────────────────────
-async function loadData() {
-  try {
-    const res = await fetch(SCRIPT_URL + "?format=json&token=" + APP_TOKEN);
-    const data = await res.json();
+// ── LOAD DATA FROM APPS SCRIPT (JSONP to bypass CORS) ─────
+function loadData() {
+  const callbackName = "handleMealData_" + Date.now();
+  const script = document.createElement("script");
+  script.src = SCRIPT_URL + "?format=json&token=" + APP_TOKEN + "&callback=" + callbackName;
+
+  const timeout = setTimeout(() => {
+    document.getElementById("loadingScreen").innerHTML =
+      `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Timed out</h2><p style="margin-top:12px;opacity:0.8;">Could not reach the server. Check your connection.</p><button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-size:16px;font-weight:600;">Retry</button></div>`;
+    delete window[callbackName];
+  }, 10000);
+
+  window[callbackName] = function(data) {
+    clearTimeout(timeout);
+    document.head.removeChild(script);
+    delete window[callbackName];
+
+    if (data.error) {
+      document.getElementById("loadingScreen").innerHTML =
+        `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Error</h2><p style="margin-top:12px;opacity:0.8;">${data.error}</p></div>`;
+      return;
+    }
+
     MEALS    = data.meals    || [];
     SECTIONS = data.sections || [];
     RECIPES  = data.recipes  || [];
@@ -212,10 +230,15 @@ async function loadData() {
     renderRecipes();
     renderLists();
     document.getElementById("loadingScreen").style.display = "none";
-  } catch(e) {
+  };
+
+  script.onerror = function() {
+    clearTimeout(timeout);
     document.getElementById("loadingScreen").innerHTML =
-      '<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Could not load</h2><p style="margin-top:12px;opacity:0.8;">Check your connection and reload</p><button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-size:16px;font-weight:600;">Reload</button></div>';
-  }
+      `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Could not load</h2><p style="margin-top:12px;opacity:0.8;">Script failed to load.</p><button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-size:16px;font-weight:600;">Retry</button></div>`;
+  };
+
+  document.head.appendChild(script);
 }
 
 function save() {
