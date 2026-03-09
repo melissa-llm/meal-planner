@@ -183,29 +183,12 @@ let MEALS = [], SECTIONS = [], RECIPES = [], WEEK = "", favorites = [], neverDo 
 let activeMeals = new Set(), checkedItems = new Set(), extraMeals = [];
 let STORAGE_KEY = "grocery_";
 
-// ── LOAD DATA FROM APPS SCRIPT (JSONP to bypass CORS) ─────
-function loadData() {
-  const callbackName = "handleMealData_" + Date.now();
-  const script = document.createElement("script");
-  script.src = SCRIPT_URL + "?format=json&token=" + APP_TOKEN + "&callback=" + callbackName;
-
-  const timeout = setTimeout(() => {
-    document.getElementById("loadingScreen").innerHTML =
-      `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Timed out</h2><p style="margin-top:12px;opacity:0.8;">Could not reach the server. Check your connection.</p><button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-size:16px;font-weight:600;">Retry</button></div>`;
-    delete window[callbackName];
-  }, 10000);
-
-  window[callbackName] = function(data) {
-    clearTimeout(timeout);
-    document.head.removeChild(script);
-    delete window[callbackName];
-
-    if (data.error) {
-      document.getElementById("loadingScreen").innerHTML =
-        `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Error</h2><p style="margin-top:12px;opacity:0.8;">${data.error}</p></div>`;
-      return;
-    }
-
+// ── LOAD DATA FROM APPS SCRIPT ─────────────────────────────
+async function loadData() {
+  try {
+    const res = await fetch(SCRIPT_URL + "?format=json&token=" + APP_TOKEN);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
     MEALS    = data.meals    || [];
     SECTIONS = data.sections || [];
     RECIPES  = data.recipes  || [];
@@ -213,7 +196,6 @@ function loadData() {
     favorites = data.favorites || [];
     neverDo   = data.neverDo   || [];
     allFavs   = data.allFavorites || [];
-
     STORAGE_KEY = "grocery_" + WEEK.replace(/\s/g,"_");
     try {
       const s = JSON.parse(localStorage.getItem(STORAGE_KEY)||"{}");
@@ -221,320 +203,14 @@ function loadData() {
       if (s.meals)   activeMeals  = new Set(s.meals);
       if (s.extra)   extraMeals   = s.extra;
     } catch(e){}
-
     document.getElementById("weekLabel").textContent = WEEK;
-    renderChips();
-    renderDropdown();
-    renderGroceryList();
-    applyFilters();
-    renderRecipes();
-    renderLists();
+    renderChips(); renderDropdown(); renderGroceryList();
+    applyFilters(); renderRecipes(); renderLists();
     document.getElementById("loadingScreen").style.display = "none";
-  };
-
-  script.onerror = function() {
-    clearTimeout(timeout);
+  } catch(e) {
     document.getElementById("loadingScreen").innerHTML =
-      `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Could not load</h2><p style="margin-top:12px;opacity:0.8;">Script failed to load.</p><button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-size:16px;font-weight:600;">Retry</button></div>`;
-  };
-
-  document.head.appendChild(script);
-}
-
-function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ checked:[...checkedItems], meals:[...activeMeals], extra:extraMeals }));
-}
-
-// ── NAVIGATION ─────────────────────────────────────────────
-function showPage(name, btn) {
-  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-  const page = document.getElementById("page-"+name);
-  page.classList.add("active");
-  page.scrollTop = 0;
-  btn.classList.add("active");
-}
-
-// ── GROCERY ────────────────────────────────────────────────
-function renderChips() {
-  const favC = document.getElementById("favChips");
-  const newC = document.getElementById("newChips");
-  favC.innerHTML = ""; newC.innerHTML = "";
-  MEALS.forEach(m => {
-    const chip = document.createElement("button");
-    chip.className = "chip" + (m.category==="NEW" ? " new-chip" : "") + (activeMeals.has(m.dayKey) ? " active" : "");
-    chip.textContent = m.name;
-    chip.onclick = () => toggleMeal(m.dayKey);
-    (m.category==="NEW" ? newC : favC).appendChild(chip);
-  });
-  extraMeals.forEach((meal, idx) => {
-    const chip = document.createElement("button");
-    chip.className = "chip" + (activeMeals.has("EXTRA_"+idx) ? " active" : "");
-    chip.textContent = "★ " + meal.name;
-    chip.onclick = () => toggleMeal("EXTRA_"+idx);
-    favC.appendChild(chip);
-  });
-}
-
-function renderDropdown() {
-  const sel = document.getElementById("favDropdown");
-  const plannedNames = new Set(MEALS.map(m => m.name.toLowerCase()));
-  const extraNames   = new Set(extraMeals.map(n => n.name.toLowerCase()));
-  sel.innerHTML = '<option value="">— pick a meal —</option>';
-  allFavs.forEach(f => {
-    if (!plannedNames.has(f.name.toLowerCase()) && !extraNames.has(f.name.toLowerCase())) {
-      const opt = document.createElement("option");
-      opt.value = f.name;
-      opt.textContent = f.name + (f.ingredients && f.ingredients.length > 0 ? " ✓" : " (no ingredients yet)");
-      sel.appendChild(opt);
-    }
-  });
-}
-
-function addFavoriteFromDropdown(sel) {
-  const val = sel.value;
-  if (!val) return;
-  const favObj = allFavs.find(f => f.name === val) || { name: val, ingredients: [] };
-  const idx = extraMeals.length;
-  extraMeals.push(favObj);
-  activeMeals.add("EXTRA_" + idx);
-  save();
-  sel.value = "";
-  renderDropdown(); renderChips(); renderGroceryList(); applyFilters();
-}
-
-function toggleMeal(dayKey) {
-  if (activeMeals.has(dayKey)) activeMeals.delete(dayKey);
-  else activeMeals.add(dayKey);
-  save(); renderChips(); applyFilters();
-}
-
-function renderGroceryList() {
-  const container = document.getElementById("groceryList");
-  container.innerHTML = "";
-  SECTIONS.forEach((section, si) => {
-    const el = document.createElement("div");
-    el.className = "g-section"; el.id = "gsec_"+si;
-    const hdr = document.createElement("div");
-    hdr.className = "g-section-header"; hdr.textContent = section.title;
-    el.appendChild(hdr);
-    const emptyMsg = document.createElement("div");
-    emptyMsg.className = "empty-msg"; emptyMsg.textContent = "No items for selected meals";
-    el.appendChild(emptyMsg);
-    section.items.forEach((item, ii) => {
-      el.appendChild(makeGroceryItem(item.name, item.qty, item.tag, "s"+si+"_i"+ii));
-    });
-    container.appendChild(el);
-  });
-  extraMeals.forEach((meal, idx) => {
-    const el = document.createElement("div");
-    el.className = "g-section"; el.id = "gsec_extra_"+idx; el.dataset.extra = idx;
-    const hdr = document.createElement("div");
-    hdr.className = "g-section-header extra-section-header";
-    hdr.textContent = "★ " + meal.name;
-    el.appendChild(hdr);
-    const emptyMsg = document.createElement("div");
-    emptyMsg.className = "empty-msg"; emptyMsg.textContent = "Tap the chip above to show this section";
-    el.appendChild(emptyMsg);
-    const hasIngredients = meal.ingredients && meal.ingredients.length > 0;
-    if (hasIngredients) {
-      const bySectionMap = {};
-      meal.ingredients.forEach(ing => {
-        const sec = ing.section || "Other";
-        if (!bySectionMap[sec]) bySectionMap[sec] = [];
-        bySectionMap[sec].push(ing);
-      });
-      let itemIdx = 0;
-      Object.entries(bySectionMap).forEach(([secName, items]) => {
-        const secLabel = document.createElement("div");
-        secLabel.style.cssText = "padding:5px 14px 2px;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.4px;background:#f8f8f8;";
-        secLabel.textContent = secName; secLabel.dataset.tag = "EXTRA_"+idx;
-        el.appendChild(secLabel);
-        items.forEach(ing => {
-          el.appendChild(makeGroceryItem(ing.name, ing.qty, "EXTRA_"+idx, "ex"+idx+"_i"+itemIdx));
-          itemIdx++;
-        });
-      });
-      for (let b=0;b<3;b++) el.appendChild(makeGroceryItem("","","EXTRA_"+idx,"ex"+idx+"_b"+b));
-    } else {
-      const note = document.createElement("div");
-      note.style.cssText = "padding:8px 14px;font-size:12px;color:#aaa;font-style:italic;background:#fffbf0;border-bottom:1px solid #f0f0f0;";
-      note.textContent = "No saved ingredients yet — add below:";
-      note.dataset.tag = "EXTRA_"+idx;
-      el.appendChild(note);
-      for (let b=0;b<6;b++) el.appendChild(makeGroceryItem("","","EXTRA_"+idx,"ex"+idx+"_b"+b));
-    }
-    container.appendChild(el);
-  });
-}
-
-function makeGroceryItem(name, qty, tag, key) {
-  const item = document.createElement("div");
-  item.className = "g-item" + (checkedItems.has(key)?" checked":"");
-  item.dataset.tag = tag||"";
-  const check = document.createElement("div");
-  check.className = "g-check";
-  check.innerHTML = '<svg class="checkmark" width="14" height="11" viewBox="0 0 14 11" fill="none"><path d="M1.5 5.5L5.5 9.5L12.5 1.5" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const textEl = document.createElement("div");
-  textEl.className = "g-item-text";
-  if (!name) {
-    const inp = document.createElement("input");
-    inp.className = "g-input"; inp.placeholder = "Add item..."; inp.type="text";
-    inp.onclick = e => e.stopPropagation();
-    textEl.appendChild(inp);
-  } else {
-    const nameEl = document.createElement("div"); nameEl.className="g-item-name"; nameEl.textContent=name;
-    textEl.appendChild(nameEl);
-    if (qty) { const qtyEl=document.createElement("div"); qtyEl.className="g-item-qty"; qtyEl.textContent=qty; textEl.appendChild(qtyEl); }
+      `<div style="padding:30px;text-align:center;color:#fff;"><h2>⚠️ Could not load</h2><p style="margin-top:12px;opacity:0.8;">${e.message}</p><button onclick="location.reload()" style="margin-top:20px;padding:12px 24px;border-radius:10px;border:2px solid #fff;background:transparent;color:#fff;font-size:16px;font-weight:600;">Retry</button></div>`;
   }
-  item.appendChild(check); item.appendChild(textEl);
-  item.onclick = e => { if(e.target.tagName==="INPUT") return; toggleGroceryItem(item, key); };
-  return item;
-}
-
-function toggleGroceryItem(el, key) {
-  if (checkedItems.has(key)) { checkedItems.delete(key); el.classList.remove("checked"); }
-  else { checkedItems.add(key); el.classList.add("checked"); }
-  save();
-}
-
-function applyFilters() {
-  const anyActive = activeMeals.size > 0;
-  SECTIONS.forEach((section, si) => {
-    const el = document.getElementById("gsec_"+si);
-    if (!el) return;
-    let visible = 0;
-    el.querySelectorAll(".g-item").forEach(itemEl => {
-      const tag = itemEl.dataset.tag||"";
-      const isCustom = tag==="CUSTOM"||tag==="";
-      const tags = tag.split(",").map(t=>t.trim()).filter(t=>t&&t!=="CUSTOM");
-      const show = !anyActive ? (isCustom||tags.length===0) : (isCustom||tags.some(t=>activeMeals.has(t)));
-      itemEl.classList.toggle("hidden",!show);
-      if (show) visible++;
-    });
-    const emptyMsg = el.querySelector(".empty-msg");
-    if (emptyMsg) emptyMsg.style.display = visible===0&&anyActive ? "block":"none";
-  });
-  extraMeals.forEach((meal, idx) => {
-    const el = document.getElementById("gsec_extra_"+idx);
-    if (!el) return;
-    const isActive = activeMeals.has("EXTRA_"+idx);
-    el.querySelectorAll("[data-tag]").forEach(child => {
-      if (child.dataset.tag === "EXTRA_"+idx) child.classList.toggle("hidden", !isActive);
-    });
-    el.querySelectorAll(".g-item").forEach(itemEl => itemEl.classList.toggle("hidden", !isActive));
-    const emptyMsg = el.querySelector(".empty-msg");
-    if (emptyMsg) emptyMsg.style.display = !isActive && anyActive ? "block" : "none";
-  });
-}
-
-function resetAll() {
-  checkedItems.clear(); activeMeals.clear(); extraMeals=[];
-  save();
-  renderDropdown(); renderChips(); renderGroceryList(); applyFilters();
-}
-
-// ── RECIPES ────────────────────────────────────────────────
-function renderRecipes() {
-  const container = document.getElementById("recipeList");
-  if (!RECIPES||RECIPES.length===0) {
-    container.innerHTML = '<div class="no-recipes">No recipes this week.</div>'; return;
-  }
-  RECIPES.forEach(r => {
-    const card = document.createElement("div"); card.className = "recipe-card";
-    const hdr = document.createElement("div");
-    hdr.className = "recipe-card-header" + (r.category==="NEW" ? " new-recipe" : "");
-    hdr.innerHTML = `<h3>${r.title}</h3><span class="recipe-badge">${r.category==="NEW" ? "✨ New this week" : "⭐ Favourite"}</span>`;
-    card.appendChild(hdr);
-    const body = document.createElement("div"); body.className = "recipe-body";
-    const ingLabel = document.createElement("div"); ingLabel.className="recipe-section-label"; ingLabel.textContent="Ingredients";
-    body.appendChild(ingLabel);
-    r.ingredients.split("\n").forEach(ing => {
-      if (!ing.trim()) return;
-      const d = document.createElement("div"); d.className="recipe-ingredient"; d.textContent="• "+ing.trim(); body.appendChild(d);
-    });
-    const stepLabel = document.createElement("div"); stepLabel.className="recipe-section-label"; stepLabel.textContent="Steps";
-    body.appendChild(stepLabel);
-    r.steps.split("\n").forEach(step => {
-      if (!step.trim()) return;
-      const d = document.createElement("div"); d.className="recipe-step"; d.textContent=step.trim(); body.appendChild(d);
-    });
-    card.appendChild(body); container.appendChild(card);
-  });
-}
-
-// ── LISTS ──────────────────────────────────────────────────
-function renderLists() { renderNewMealsList(); renderFavList(); renderNeverList(); }
-
-function renderNewMealsList() {
-  const card = document.getElementById("newMealsCard");
-  const container = document.getElementById("newMealsList");
-  container.innerHTML = "";
-  const newMeals = MEALS.filter(m => m.category === "NEW");
-  if (newMeals.length === 0) { card.style.display = "none"; return; }
-  card.style.display = "block";
-  const note = document.createElement("div"); note.className = "new-meal-note";
-  note.textContent = "Tap ⭐ to add to your favourites for future weeks";
-  container.appendChild(note);
-  newMeals.forEach(m => {
-    const alreadyFav = favorites.some(f => f.toLowerCase() === m.name.toLowerCase());
-    const row = document.createElement("div"); row.className = "list-item-row";
-    if (alreadyFav) {
-      row.innerHTML = `<span>${m.name}</span><span style="font-size:13px;color:#2d6a4f;font-weight:700;">✓ In favourites</span>`;
-    } else {
-      row.innerHTML = `<span>${m.name}</span><button class="promote-btn" onclick="promoteToFav('${m.name.replace(/'/g,"\\'")}')">⭐ Add</button>`;
-    }
-    container.appendChild(row);
-  });
-}
-
-function promoteToFav(name) {
-  if (favorites.some(f => f.toLowerCase() === name.toLowerCase())) return;
-  favorites.push(name);
-  allFavs.push({ name, ingredients: [] });
-  renderNewMealsList(); renderFavList(); renderDropdown();
-  persistLists(); showBanner("⭐ Added to favourites!");
-}
-
-function renderFavList() {
-  const container = document.getElementById("favList"); container.innerHTML = "";
-  favorites.forEach((f, i) => {
-    const row = document.createElement("div"); row.className="list-item-row";
-    row.innerHTML = `<span>${f}</span><button class="del-btn" onclick="removeFav(${i})">×</button>`;
-    container.appendChild(row);
-  });
-}
-
-function renderNeverList() {
-  const container = document.getElementById("neverList"); container.innerHTML = "";
-  neverDo.forEach((n, i) => {
-    const row = document.createElement("div"); row.className="list-item-row";
-    row.innerHTML = `<span>${n}</span><button class="del-btn" onclick="removeNever(${i})">×</button>`;
-    container.appendChild(row);
-  });
-}
-
-function addFav() {
-  const input = document.getElementById("newFavInput");
-  const val = input.value.trim(); if (!val) return;
-  favorites.push(val); allFavs.push({ name: val, ingredients: [] });
-  input.value=""; renderFavList(); renderDropdown(); persistLists();
-}
-
-function removeFav(i) {
-  const removed = favorites.splice(i,1)[0];
-  allFavs = allFavs.filter(f => f.name !== removed);
-  renderFavList(); renderDropdown(); persistLists();
-}
-
-function addNever() {
-  const input = document.getElementById("newNeverInput");
-  const val = input.value.trim(); if (!val) return;
-  neverDo.push(val); input.value=""; renderNeverList(); persistLists();
-}
-
-function removeNever(i) {
-  neverDo.splice(i,1); renderNeverList(); persistLists();
 }
 
 let saveTimer;
@@ -543,22 +219,18 @@ function persistLists() {
   saveTimer = setTimeout(async () => {
     document.getElementById("savingOverlay").classList.add("show");
     try {
-      const res = await fetch(SCRIPT_URL, {
-        method:"POST",
-        body: JSON.stringify({ action:"saveLists", favorites, neverDo, token: APP_TOKEN }),
-        headers:{"Content-Type":"application/json"}
+      const params = new URLSearchParams({
+        action: "saveLists",
+        token: APP_TOKEN,
+        favorites: JSON.stringify(favorites),
+        neverDo: JSON.stringify(neverDo)
       });
+      const res = await fetch(SCRIPT_URL + "?" + params);
       const json = await res.json();
-      showBanner(json.success ? "✓ Saved to Google Sheets" : "Error: "+json.error, !json.success);
-    } catch(e) { showBanner("Error saving: "+e.message, true); }
+      showBanner(json.success ? "✓ Saved to Google Sheets" : "Error: " + json.error, !json.success);
+    } catch(e) { showBanner("Error saving: " + e.message, true); }
     document.getElementById("savingOverlay").classList.remove("show");
   }, 800);
-}
-function showBanner(msg, isError) {
-  const b = document.getElementById("saveBanner");
-  b.textContent = msg; b.className = "save-bar" + (isError?" error":"");
-  b.style.display = "block";
-  setTimeout(()=>{ b.style.display="none"; }, 3000);
 }
 
 loadData();
