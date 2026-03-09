@@ -554,7 +554,6 @@ function persistLists() {
     document.getElementById("savingOverlay").classList.remove("show");
   }, 800);
 }
-
 function showBanner(msg, isError) {
   const b = document.getElementById("saveBanner");
   b.textContent = msg; b.className = "save-bar" + (isError?" error":"");
