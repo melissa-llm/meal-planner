@@ -185,7 +185,7 @@ let STORAGE_KEY = "grocery_";
 // ── LOAD DATA FROM APPS SCRIPT ─────────────────────────────
 async function loadData() {
   try {
-    const res = await fetch(SCRIPT_URL);
+    const res = await fetch(SCRIPT_URL + "?format=json");
     const data = await res.json();
     MEALS    = data.meals    || [];
     SECTIONS = data.sections || [];
